@@ -1,0 +1,6 @@
+{
+  "name": "ServerWatch",
+  "description": "A comprehensive real-time server monitoring dashboard with authenticated access, polling history, and dekstop alerts.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

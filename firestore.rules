@@ -1,0 +1,91 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Entity Validations ---
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['email', 'createdAt']) &&
+             data.keys().size() == 2 &&
+             data.email is string && data.email.size() <= 256 &&
+             data.createdAt is string; // Simplified for this context
+    }
+
+    function isValidServer(data) {
+      return data.keys().hasAll(['userId', 'name', 'url', 'interval', 'createdAt']) &&
+             data.keys().size() == 5 &&
+             data.userId == request.auth.uid &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.url is string && data.url.size() > 0 && data.url.size() <= 512 &&
+             data.interval is number && data.interval >= 1 && data.interval <= 1440 &&
+             data.createdAt is string;
+    }
+
+    function isValidHistory(data) {
+      return data.keys().hasAll(['userId', 'timestamp', 'responseTime', 'status', 'createdAt']) &&
+             data.keys().size() == 5 &&
+             data.userId == request.auth.uid &&
+             data.timestamp is string &&
+             data.responseTime is number &&
+             data.status in ['online', 'offline'] &&
+             data.createdAt == request.time;
+    }
+
+    // --- Path Rules ---
+
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUser(incoming());
+      allow update: if isOwner(userId) && isValidUser(incoming()) && 
+                    incoming().diff(existing()).affectedKeys().hasOnly(['email']);
+    }
+
+    match /servers/{serverId} {
+      allow get: if isSignedIn() && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      
+      allow create: if isSignedIn() && 
+                    isValidId(serverId) && 
+                    isValidServer(incoming()) &&
+                    exists(/databases/$(database)/documents/users/$(request.auth.uid));
+
+      allow update: if isSignedIn() && 
+                    existing().userId == request.auth.uid &&
+                    isValidServer(incoming()) &&
+                    incoming().userId == existing().userId &&
+                    incoming().diff(existing()).affectedKeys().hasOnly(['name', 'url', 'interval']);
+
+      allow delete: if isSignedIn() && existing().userId == request.auth.uid;
+
+      match /history/{historyId} {
+        allow list, get: if isSignedIn() && resource.data.userId == request.auth.uid;
+        allow create: if isSignedIn() && isValidHistory(incoming());
+      }
+    }
+  }
+}
